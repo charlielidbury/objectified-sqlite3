@@ -56,9 +56,8 @@ function addGetters(db, stmt) {
   };
 }
 
-function Database() {
-  const db = sqlite(...arguments);
-  const schema = db
+function generateSchema(db) {
+  return db
     .prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
     .all()
     .map(({ name }) =>
@@ -73,6 +72,11 @@ function Database() {
         }))
     )
     .flat();
+}
+
+function createDatabase() {
+  const db = sqlite(...arguments);
+  const schema = generateSchema(db);
 
   const obj = {
     db,
@@ -86,6 +90,7 @@ function Database() {
 
     prepare() {
       const str = obj.escape(...arguments);
+      
       let stmt;
       try {
         stmt = db.prepare(str);
@@ -119,4 +124,4 @@ function Database() {
   return obj;
 }
 
-module.exports = Database;
+module.exports = createDatabase;
