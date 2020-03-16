@@ -1,109 +1,122 @@
-const escape = require("sql-template-strings");
+const escape2 = require("sql-template-strings");
 const sqlstring = require("sqlstring");
 const sqlite = require("better-sqlite3");
 
-module.exports = class {
-  constructor(path) {
-    this.db = sqlite(path);
-    this.schema = this.db
-      .prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
-      .all()
-      .map(({ name }) =>
-        db
-          .prepare(`PRAGMA foreign_key_list("${name}")`)
-          .all()
-          .map(({ table, from, to }) => ({
-            localTable: name,
-            localColumn: from || "rowid",
-            foreignTable: table,
-            foreignColumn: to || "rowid"
-          }))
-      )
-      .flat();
-  }
+function addGetters(db, stmt) {
+  const parents = [];
+  const children = [];
 
-  _addGetters(stmt) {
-    const parents = [];
-    const children = [];
-
-    stmt.columns().forEach(({ table, column, name }) => {
-      fks.forEach(
-        ({ localTable, localColumn, foreignTable, foreignColumn }) => {
-          if (table === localTable && column === localColumn) {
-            // parent
-            parents.push({
-              name,
-              foreignColumn,
-              foreignTable
-            });
-          } else if (table === foreignTable && column === foreignColumn) {
-            // child
-            children.push({
-              localTable,
-              localColumn,
-              foreignTable,
-              foreignColumn
-            });
-          }
+  stmt.columns().forEach(({ table, column, name }) => {
+    db.schema.forEach(
+      ({ localTable, localColumn, foreignTable, foreignColumn }) => {
+        if (table === localTable && column === localColumn) {
+          // parent
+          parents.push({
+            name,
+            foreignColumn,
+            foreignTable
+          });
+        } else if (table === foreignTable && column === foreignColumn) {
+          // child
+          children.push({
+            localTable,
+            localColumn,
+            foreignTable,
+            foreignColumn
+          });
         }
-      );
-    });
+      }
+    );
+  });
 
-    return row => {
-      const rawRow = { ...row };
+  return row => {
+    const rawRow = { ...row };
 
-      // puts parents into object
-      parents.forEach(({ name, foreignColumn, foreignTable }) => {
-        Object.defineProperty(row, name, {
-          get: this.prepare`
+    // puts parents into object
+    parents.forEach(({ name, foreignColumn, foreignTable }) => {
+      Object.defineProperty(row, name, {
+        get: db.prepare`
             SELECT * FROM ?${foreignTable}
             WHERE ?${foreignColumn} = ${rawRow[name]}
           `.get
-        });
       });
+    });
 
-      // puts children into object
-      children.forEach(({ localTable, localColumn, foreignColumn }) => {
-        Object.defineProperty(row, localTable + "s", {
-          get: this.prepare`
+    // puts children into object
+    children.forEach(({ localTable, localColumn, foreignColumn }) => {
+      Object.defineProperty(row, localTable + "s", {
+        get: db.prepare`
             SELECT * FROM ?${localTable}
             WHERE ?${localColumn} = ${rawRow[foreignColumn]}
           `.all
-        });
       });
+    });
 
-      return row;
-    };
-  }
+    return row;
+  };
+}
 
-  escape() {
-    const { query, values } = escape(...arguments);
-    sqlstring.format(query, values);
-  }
+function Database() {
+  const db = sqlite(...arguments);
+  const schema = db
+    .prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
+    .all()
+    .map(({ name }) =>
+      db
+        .prepare(`PRAGMA foreign_key_list("${name}")`)
+        .all()
+        .map(({ table, from, to }) => ({
+          localTable: name,
+          localColumn: from || "rowid",
+          foreignTable: table,
+          foreignColumn: to || "rowid"
+        }))
+    )
+    .flat();
 
-  prepare() {
-    const str = this.escape(...arguments);
-    const stmt = this.db.prepare(str);
-    const mapFn = this._addGetters(stmt);
+  const obj = {
+    db,
 
-    stmt._get = stmt.get;
-    stmt.get = function() {
-      return mapFn(stmt._get(...arguments));
-    };
+    schema,
 
-    stmt._all = stmt.all;
-    stmt.all = function() {
-      return stmt._all(...arguments).map(mapFn);
-    };
+    escape() {
+      const { query, values } = escape2(...arguments);
+      return sqlstring.format(query, values);
+    },
 
-    delete stmt.iterate;
+    prepare() {
+      const str = obj.escape(...arguments);
+      let stmt;
+      try {
+        stmt = db.prepare(str);
+      } catch (err) {
+        throw err;
+      }
+      const mapFn = addGetters(obj, stmt);
 
-    return stmt;
-  }
+      stmt._get = stmt.get;
+      stmt.get = function() {
+        return mapFn(stmt._get(...arguments));
+      };
 
-  sql() {
-    const stmt = this.prepare(...arguments);
+      stmt._all = stmt.all;
+      stmt.all = function() {
+        return stmt._all(...arguments).map(mapFn);
+      };
 
-    return stmt.all();
-  }
-};
+      delete stmt.iterate;
+
+      return stmt;
+    },
+
+    sql() {
+      const stmt = obj.prepare(...arguments);
+
+      return stmt.all();
+    }
+  };
+
+  return obj;
+}
+
+module.exports = Database;
