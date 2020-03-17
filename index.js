@@ -7,26 +7,14 @@ function addGetters(db, stmt) {
   const children = [];
 
   stmt.columns().forEach(({ table, column, name }) => {
-    db.schema.forEach(
-      ({ localTable, localColumn, foreignTable, foreignColumn }) => {
-        if (table === localTable && column === localColumn) {
-          // parent
-          parents.push({
-            name,
-            foreignColumn,
-            foreignTable
-          });
-        } else if (table === foreignTable && column === foreignColumn) {
-          // child
-          children.push({
-            localTable,
-            localColumn,
-            foreignTable,
-            foreignColumn
-          });
-        }
-      }
-    );
+    const relationship = db.schema[table][column];
+    if (!relationship) return;
+
+    // parents
+    parents.push(relationship);
+
+    // children
+    children.push()
   });
 
   return row => {
@@ -57,21 +45,38 @@ function addGetters(db, stmt) {
 }
 
 function generateSchema(db) {
-  return db
-    .prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
+  const schema = {};
+
+  db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
     .all()
-    .map(({ name }) =>
-      db
-        .prepare(`PRAGMA foreign_key_list("${name}")`)
-        .all()
-        .map(({ table, from, to }) => ({
-          localTable: name,
-          localColumn: from || "rowid",
-          foreignTable: table,
-          foreignColumn: to || "rowid"
-        }))
-    )
-    .flat();
+    .forEach(({ name }) => {
+      schema[name] = {
+        name,
+        parents: {},
+        children: {},
+      };
+    });
+
+  // 'one' and 'many' reference the "one to many" relationship
+  Object.values(schema).forEach(manyTable => {
+    db.prepare(`PRAGMA foreign_key_list("${manyTable.name}")`)
+      .all()
+      .forEach(({ table: oneTableName, from: manyColumn, to: oneColumn }) => {
+        const oneTable = schema[oneTableName];
+        const relationship = {
+          oneTable,
+          oneColumn,
+          manyTable,
+          manyColumn
+        };
+        // parent
+        manyTable.parents[manyColumn] = relationship;
+        // children
+        oneTable.children[manyColumn] = relationship;
+      });
+  });
+
+  return schema;
 }
 
 function createDatabase() {
@@ -90,7 +95,7 @@ function createDatabase() {
 
     prepare() {
       const str = obj.escape(...arguments);
-      
+
       let stmt;
       try {
         stmt = db.prepare(str);
