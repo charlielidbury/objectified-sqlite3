@@ -3,53 +3,30 @@ const sqlstring = require("sqlstring");
 const sqlite = require("better-sqlite3");
 
 function addGetters(db, stmt) {
-  const parents = [];
-  const children = [];
-
-  stmt.columns().forEach(({ table, column, name }) => {
-    db.schema.forEach(
-      ({ localTable, localColumn, foreignTable, foreignColumn }) => {
-        if (table === localTable && column === localColumn) {
-          // parent
-          parents.push({
-            name,
-            foreignColumn,
-            foreignTable
-          });
-        } else if (table === foreignTable && column === foreignColumn) {
-          // child
-          children.push({
-            localTable,
-            localColumn,
-            foreignTable,
-            foreignColumn
-          });
-        }
-      }
-    );
-  });
+  const columns = stmt
+    .columns()
+    .map(({ table, column, name }) => ({
+      name,
+      rel: db.schema[table][column]
+    }))
+    .filter(c => c.rel);
 
   return row => {
     const rawRow = { ...row };
 
-    // puts parents into object
-    parents.forEach(({ name, foreignColumn, foreignTable }) => {
-      Object.defineProperty(row, name, {
-        get: db.prepare`
-            SELECT * FROM ?${foreignTable}
-            WHERE ?${foreignColumn} = ${rawRow[name]}
-          `.get
-      });
-    });
+    // adds getters to object
+    columns.forEach(({ name, rel: { parent, children } }) => {
+      if (parent)
+        Object.defineProperty(row, name, {
+          get: () => parent.stmt.get(rawRow[name])
+        });
 
-    // puts children into object
-    children.forEach(({ localTable, localColumn, foreignColumn }) => {
-      Object.defineProperty(row, localTable + "s", {
-        get: db.prepare`
-            SELECT * FROM ?${localTable}
-            WHERE ?${localColumn} = ${rawRow[foreignColumn]}
-          `.all
-      });
+      if (children)
+        children.forEach(child => {
+          Object.defineProperty(row, child.manyTable + "s", {
+            get: () => child.stmt.all(rawRow[child.oneColumn])
+          });
+        });
     });
 
     return row;
@@ -57,21 +34,79 @@ function addGetters(db, stmt) {
 }
 
 function generateSchema(db) {
-  return db
-    .prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
+  const schema = {
+    /*
+    table: {
+      column1: {
+        parent: relationship, // { oneTable, oneColumn, manyTable, manyColumn }
+      },
+      column2: {
+        children: [relationship]
+      }
+    }
+  */
+  };
+
+  db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
     .all()
-    .map(({ name }) =>
-      db
-        .prepare(`PRAGMA foreign_key_list("${name}")`)
-        .all()
-        .map(({ table, from, to }) => ({
-          localTable: name,
-          localColumn: from || "rowid",
-          foreignTable: table,
-          foreignColumn: to || "rowid"
-        }))
-    )
-    .flat();
+    .forEach(({ name }) => {
+      schema[name] = {};
+    });
+
+  // puts all parents in schema
+  Object.keys(schema).forEach(manyTable => {
+    db.prepare(`PRAGMA foreign_key_list("${manyTable}")`)
+      .all()
+      .forEach(({ table: oneTable, from: manyColumn, to: oneColumn }) => {
+        schema[manyTable][manyColumn] = {
+          parent: {
+            oneTable,
+            oneColumn: oneColumn || "rowid",
+            manyTable,
+            manyColumn
+          },
+          children: []
+        };
+      });
+  });
+
+  // fills in the children
+  Object.values(schema).forEach(obj =>
+    Object.values(obj).forEach(({ parent }) => {
+      if (!parent) return;
+
+      const { oneTable, oneColumn } = parent;
+
+      if (!schema[oneTable][oneColumn])
+        schema[oneTable][oneColumn] = {
+          children: []
+        };
+
+      schema[oneTable][oneColumn].children.push(parent);
+    })
+  );
+
+  return schema;
+}
+
+function addStatementsToSchema(db) {
+  Object.values(db.schema).forEach(table =>
+    Object.values(table).forEach(({ parent, children }) => {
+      if (parent)
+        parent.stmt = db.prepare`
+        SELECT * FROM ?${parent.oneTable}
+        WHERE ?${parent.oneColumn} = ?
+      `;
+
+      if (children)
+        children.forEach(child => {
+          child.stmt = db.prepare`
+            SELECT * FROM ?${child.manyTable}
+            WHERE ?${child.manyColumn} = ?
+          `;
+        });
+    })
+  );
 }
 
 function createDatabase() {
@@ -90,7 +125,7 @@ function createDatabase() {
 
     prepare() {
       const str = obj.escape(...arguments);
-      
+
       let stmt;
       try {
         stmt = db.prepare(str);
@@ -120,6 +155,8 @@ function createDatabase() {
       return stmt.all();
     }
   };
+
+  addStatementsToSchema(obj);
 
   return obj;
 }
