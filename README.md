@@ -54,13 +54,7 @@ const columnName = "firstname";
 db.escape`SELECT ?${columnName} FROM ?${tableName}`; // SELECT `firstname` FROM `user`
 ```
 
-This works because `sql-template-strings` blindly replaces JavaScript expressions with `?`, and `sqlstring` interprets `??` as a column/table name.
-
-```js
-(db.escape`SELECT * FROM ?${tableName}` ==
-  sqlstring.format("SELECT * FROM ??", [tableName])) ==
-  "SELECT * FROM `user`";
-```
+This works because `sql-template-strings` blindly replaces JavaScript expressions with `?`, and `sqlstring` interprets `??` as a column/table name. For instance `` db.escape`SELECT * FROM ?${tableName}` `` becomes `sqlstring.format("SELECT * FROM ??", [tableName])` which is evaluated to `` "SELECT * FROM `user`" ``.
 
 It also allows for statements to be escaped before they are prepared, so variables can be injected in multiple steps.
 
