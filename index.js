@@ -18,19 +18,13 @@ function addGetters(db, stmt) {
     columns.forEach(({ name, rel: { parent, children } }) => {
       if (parent)
         Object.defineProperty(row, name, {
-          get: db.prepare`
-            SELECT * FROM ?${parent.oneTable}
-            WHERE ?${parent.oneColumn} = ${rawRow[name]}
-          `.get
+          get: () => parent.stmt.get(rawRow[name])
         });
 
       if (children)
         children.forEach(child => {
           Object.defineProperty(row, child.manyTable + "s", {
-            get: db.prepare`
-              SELECT * FROM ?${child.manyTable}
-              WHERE ?${child.manyColumn} = ${rawRow[child.oneColumn]}
-            `.all
+            get: () => child.stmt.all(rawRow[child.oneColumn])
           });
         });
     });
@@ -95,6 +89,26 @@ function generateSchema(db) {
   return schema;
 }
 
+function addStatementsToSchema(db) {
+  Object.values(db.schema).forEach(table =>
+    Object.values(table).forEach(({ parent, children }) => {
+      if (parent)
+        parent.stmt = db.prepare`
+        SELECT * FROM ?${parent.oneTable}
+        WHERE ?${parent.oneColumn} = ?
+      `;
+
+      if (children)
+        children.forEach(child => {
+          child.stmt = db.prepare`
+            SELECT * FROM ?${child.manyTable}
+            WHERE ?${child.manyColumn} = ?
+          `;
+        });
+    })
+  );
+}
+
 function createDatabase() {
   const db = sqlite(...arguments);
   const schema = generateSchema(db);
@@ -141,6 +155,8 @@ function createDatabase() {
       return stmt.all();
     }
   };
+
+  addStatementsToSchema(obj);
 
   return obj;
 }
