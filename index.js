@@ -3,41 +3,36 @@ const sqlstring = require("sqlstring");
 const sqlite = require("better-sqlite3");
 
 function addGetters(db, stmt) {
-  const parents = [];
-  const children = [];
-
-  stmt.columns().forEach(({ table, column, name }) => {
-    const relationship = db.schema[table][column];
-    if (!relationship) return;
-
-    // parents
-    parents.push(relationship);
-
-    // children
-    children.push()
-  });
+  const columns = stmt
+    .columns()
+    .map(({ table, column, name }) => ({
+      name,
+      rel: db.schema[table][column]
+    }))
+    .filter(c => c.rel);
 
   return row => {
     const rawRow = { ...row };
 
-    // puts parents into object
-    parents.forEach(({ name, foreignColumn, foreignTable }) => {
-      Object.defineProperty(row, name, {
-        get: db.prepare`
-            SELECT * FROM ?${foreignTable}
-            WHERE ?${foreignColumn} = ${rawRow[name]}
+    // adds getters to object
+    columns.forEach(({ name, rel: { parent, children } }) => {
+      if (parent)
+        Object.defineProperty(row, name, {
+          get: db.prepare`
+            SELECT * FROM ?${parent.oneTable}
+            WHERE ?${parent.oneColumn} = ${rawRow[name]}
           `.get
-      });
-    });
+        });
 
-    // puts children into object
-    children.forEach(({ localTable, localColumn, foreignColumn }) => {
-      Object.defineProperty(row, localTable + "s", {
-        get: db.prepare`
-            SELECT * FROM ?${localTable}
-            WHERE ?${localColumn} = ${rawRow[foreignColumn]}
-          `.all
-      });
+      if (children)
+        children.forEach(child => {
+          Object.defineProperty(row, child.manyTable + "s", {
+            get: db.prepare`
+              SELECT * FROM ?${child.manyTable}
+              WHERE ?${child.manyColumn} = ${rawRow[child.oneColumn]}
+            `.all
+          });
+        });
     });
 
     return row;
@@ -45,36 +40,57 @@ function addGetters(db, stmt) {
 }
 
 function generateSchema(db) {
-  const schema = {};
+  const schema = {
+    /*
+    table: {
+      column1: {
+        parent: relationship, // { oneTable, oneColumn, manyTable, manyColumn }
+      },
+      column2: {
+        children: [relationship]
+      }
+    }
+  */
+  };
 
   db.prepare(`SELECT name FROM sqlite_master WHERE type='table'`)
     .all()
     .forEach(({ name }) => {
-      schema[name] = {
-        name,
-        parents: {},
-        children: {},
-      };
+      schema[name] = {};
     });
 
-  // 'one' and 'many' reference the "one to many" relationship
-  Object.values(schema).forEach(manyTable => {
-    db.prepare(`PRAGMA foreign_key_list("${manyTable.name}")`)
+  // puts all parents in schema
+  Object.keys(schema).forEach(manyTable => {
+    db.prepare(`PRAGMA foreign_key_list("${manyTable}")`)
       .all()
-      .forEach(({ table: oneTableName, from: manyColumn, to: oneColumn }) => {
-        const oneTable = schema[oneTableName];
-        const relationship = {
-          oneTable,
-          oneColumn,
-          manyTable,
-          manyColumn
+      .forEach(({ table: oneTable, from: manyColumn, to: oneColumn }) => {
+        schema[manyTable][manyColumn] = {
+          parent: {
+            oneTable,
+            oneColumn: oneColumn || "rowid",
+            manyTable,
+            manyColumn
+          },
+          children: []
         };
-        // parent
-        manyTable.parents[manyColumn] = relationship;
-        // children
-        oneTable.children[manyColumn] = relationship;
       });
   });
+
+  // fills in the children
+  Object.values(schema).forEach(obj =>
+    Object.values(obj).forEach(({ parent }) => {
+      if (!parent) return;
+
+      const { oneTable, oneColumn } = parent;
+
+      if (!schema[oneTable][oneColumn])
+        schema[oneTable][oneColumn] = {
+          children: []
+        };
+
+      schema[oneTable][oneColumn].children.push(parent);
+    })
+  );
 
   return schema;
 }
