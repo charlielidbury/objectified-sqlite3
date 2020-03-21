@@ -41,6 +41,21 @@ All rows returned by `objectified-sqlite3` are regular JavaScript objects with e
 
 None of these getters impliment any caching, which means every time you `user.shifts` it could potentially be fetching hundreds of rows. Something to watch out performance wise, but it means no extra memory is used.
 
+## Functions
+
+As part of the escaping: functions are registered via better-sqlite3's [`con.function`](https://github.com/JoshuaWise/better-sqlite3/blob/master/docs/api.md#functionname-options-function---this) and the name of the function is subbed in.
+
+For instance
+```js
+const stmt = prepare`
+	SELECT ${ n => n + 1 }(?) AS n
+`;
+
+console.log(stmt.get(5)); // { n: 6 }
+```
+
+For instance ``escape`SELECT ${ n => n + 1 }(5)` `` will get converted to `SELECT AUTO_FUNC_0c51edad8dac919556dd395b457221d1(5)` and run `db.function("AUTO_FUNC_0c51edad8dac919556dd395b457221d1", n => n + 1)`, which when run will return 6.
+
 ## .escape\`SQL` -> String
 
 Escapes SQL via a combination of [`sql-template-strings`](https://github.com/felixfbecker/node-sql-template-strings) and [`sqlstring`](https://github.com/mysqljs/sqlstring).
@@ -69,7 +84,7 @@ db.db.prepare(str).all("Charlie"); // executes SELECT * FROM `user` WHERE `first
 Escapes SQL via `.escape`, then makes it into a [better-sqlite3 `prepared statement`](https://github.com/JoshuaWise/better-sqlite3/blob/master/docs/api.md#class-statement) with a few alterations:
 
 - `.all` and `.get` methods altered to add foreign key getters to returned rows (As described in `Rows`),
-- `.iter` method removed.
+- `.iter` method removed (never needed this method myself, and it would be a pain to get it playing nicely with the getters).
 
 ## .sql\`SQL` -> array of rows
 
