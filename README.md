@@ -54,8 +54,6 @@ const stmt = prepare`
 console.log(stmt.get(5)); // { n: 6 }
 ```
 
-For instance ``escape`SELECT ${ n => n + 1 }(5)` `` will get converted to `SELECT AUTO_FUNC_0c51edad8dac919556dd395b457221d1(5)` and run `db.function("AUTO_FUNC_0c51edad8dac919556dd395b457221d1", n => n + 1)`, which when run will return 6.
-
 ## .escape\`SQL` -> String
 
 Escapes SQL via a combination of [`sql-template-strings`](https://github.com/felixfbecker/node-sql-template-strings) and [`sqlstring`](https://github.com/mysqljs/sqlstring).
