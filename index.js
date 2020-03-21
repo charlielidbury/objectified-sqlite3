@@ -1,10 +1,12 @@
 const escape2 = require("sql-template-strings");
 const sqlstring = require("sqlstring");
 const sqlite = require("better-sqlite3");
+const md5 = require("md5");
 
 function addGetters(db, stmt) {
   const columns = stmt
     .columns()
+    .filter(c => c.table)
     .map(({ table, column, name }) => ({
       name,
       rel: db.schema[table][column]
@@ -120,7 +122,18 @@ function createDatabase() {
 
     escape() {
       const { query, values } = escape2(...arguments);
-      return sqlstring.format(query, values);
+
+      const funcVals = values.map(value => {
+        if (typeof value !== "function") return value;
+
+        const funcName = "AUTO_FUNC_" + md5(value.toString());
+
+        db.function(funcName, value);
+
+        return funcName;
+      });
+
+      return sqlstring.format(query, funcVals);
     },
 
     prepare() {
@@ -135,12 +148,12 @@ function createDatabase() {
       const mapFn = addGetters(obj, stmt);
 
       stmt._get = stmt.get;
-      stmt.get = function() {
+      stmt.get = function () {
         return mapFn(stmt._get(...arguments));
       };
 
       stmt._all = stmt.all;
-      stmt.all = function() {
+      stmt.all = function () {
         return stmt._all(...arguments).map(mapFn);
       };
 
