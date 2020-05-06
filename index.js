@@ -9,7 +9,7 @@ function addGetters(db, stmt) {
     .filter(c => c.table)
     .map(({ table, column, name }) => ({
       name,
-      rel: db.schema[table][column]
+      rel: db.schema[table] && db.schema[table][column]
     }))
     .filter(c => c.rel);
 
