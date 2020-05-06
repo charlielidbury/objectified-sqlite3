@@ -145,17 +145,20 @@ function createDatabase() {
       } catch (err) {
         throw err;
       }
-      const mapFn = addGetters(obj, stmt);
 
-      stmt._get = stmt.get;
-      stmt.get = function () {
-        return mapFn(stmt._get(...arguments));
-      };
+      if (stmt.reader) {
+        const mapFn = addGetters(obj, stmt);
 
-      stmt._all = stmt.all;
-      stmt.all = function () {
-        return stmt._all(...arguments).map(mapFn);
-      };
+        stmt._get = stmt.get;
+        stmt.get = function () {
+          return mapFn(stmt._get(...arguments));
+        };
+
+        stmt._all = stmt.all;
+        stmt.all = function () {
+          return stmt._all(...arguments).map(mapFn);
+        };
+      }
 
       delete stmt.iterate;
 
