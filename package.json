@@ -2,10 +2,11 @@
   "name": "objectified-sqlite3",
   "version": "1.4.2",
   "description": "Makes querying an SQLite file even easier",
-  "main": "index.js",
+  "main": "src/createDatabase.js",
   "license": "MIT",
   "repository": "charlielidbury/objectified-sqlite3",
   "dependencies": {
+    "bcrypt": "^5.0.0",
     "better-sqlite3": "^6.0.1",
     "md5": "^2.2.1",
     "sql-template-strings": "^2.2.2",
